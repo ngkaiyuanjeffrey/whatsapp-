@@ -12,8 +12,8 @@ Consent-based internal messaging platform using PHP, MySQL, and a Windows Python
 ## Local setup
 
 1. Create a MySQL database and import `database/schema.sql`.
-2. Copy `web/config.example.php` to `web/config.local.php` and set local values.
-3. Configure Apache's document root to `web/` or use the included `.htaccess`.
+2. Copy `web/config.example.php` to `web/config.local.php` and set local values. If the file does not exist yet, the app will try to create it from the example on first run.
+3. Configure Apache's document root to the project root or `web/` directory, depending on your local setup.
 4. Install worker dependencies with `python -m pip install -r worker/requirements.txt`.
 5. Copy `worker/config.example.ini` to `worker/config.ini`; never commit the token.
 6. Link WhatsApp Web manually in the persistent worker browser profile.

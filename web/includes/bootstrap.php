@@ -3,8 +3,17 @@ declare(strict_types=1);
 
 $configPath = __DIR__ . '/../config.local.php';
 if (!is_file($configPath)) {
-    http_response_code(500);
-    exit('Application is not configured.');
+    $exampleConfigPath = __DIR__ . '/../config.example.php';
+    if (is_file($exampleConfigPath)) {
+        $copied = @copy($exampleConfigPath, $configPath);
+        if ($copied === false) {
+            http_response_code(500);
+            exit('Application configuration is missing. Copy config.example.php to config.local.php and set your local database values.');
+        }
+    } else {
+        http_response_code(500);
+        exit('Application configuration is missing. Create config.local.php from config.example.php and set your local database values.');
+    }
 }
 
 $config = require $configPath;
@@ -20,6 +29,7 @@ session_set_cookie_params([
 session_start();
 
 try {
+    //echo $config['database']['dsn'], $config['database']['username'], $config['database']['password'];
     $pdo = new PDO($config['database']['dsn'], $config['database']['username'], $config['database']['password'], [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,

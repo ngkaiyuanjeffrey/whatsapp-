@@ -35,6 +35,53 @@ if ($action === 'heartbeat') {
     jsonResponse(true, 'Heartbeat accepted');
 }
 
+if ($action === 'claim') {
+    $pdo->beginTransaction();
+    $stmt = $pdo->prepare('
+        SELECT j.id, j.rendered_message, c.phone, c.name AS contact_name
+        FROM message_jobs j
+        JOIN contacts c ON j.contact_id = c.id
+        WHERE j.status = "pending"
+          AND (j.scheduled_at IS NULL OR j.scheduled_at <= UTC_TIMESTAMP())
+          AND (j.next_attempt_at IS NULL OR j.next_attempt_at <= UTC_TIMESTAMP())
+        ORDER BY j.id ASC
+        LIMIT 1
+        FOR UPDATE
+    ');
+    $stmt->execute();
+    $job = $stmt->fetch();
+
+    if (!$job) {
+        $pdo->commit();
+        jsonResponse(true, 'No pending jobs', null);
+    }
+
+    $claimStmt = $pdo->prepare('
+        UPDATE message_jobs
+        SET status = "processing",
+            worker_id = :worker_id,
+            claimed_at = UTC_TIMESTAMP(),
+            attempts = attempts + 1
+        WHERE id = :id
+    ');
+    $claimStmt->execute([
+        'worker_id' => $worker['id'],
+        'id' => $job['id'],
+    ]);
+
+    $updateWorkerStmt = $pdo->prepare('UPDATE workers SET current_job_id = :job_id WHERE id = :worker_id');
+    $updateWorkerStmt->execute(['job_id' => $job['id'], 'worker_id' => $worker['id']]);
+
+    $pdo->commit();
+
+    jsonResponse(true, 'Job claimed', [
+        'job_id' => (int) $job['id'],
+        'phone' => $job['phone'],
+        'contact_name' => $job['contact_name'],
+        'message' => $job['rendered_message'],
+    ]);
+}
+
 if ($action === 'report') {
     $jobId = filter_var($input['job_id'] ?? null, FILTER_VALIDATE_INT);
     $result = $input['result'] ?? '';
@@ -54,6 +101,10 @@ if ($action === 'report') {
     $newStatus = $result === 'sent' ? 'sent' : ((int) $job['attempts'] < (int) $job['max_attempts'] ? 'pending' : 'failed');
     $stmt = $pdo->prepare('UPDATE message_jobs SET status = :status, worker_id = NULL, claimed_at = NULL, completed_at = CASE WHEN :final = 1 THEN UTC_TIMESTAMP() ELSE NULL END, last_error = :error WHERE id = :id AND status = "processing" AND worker_id = :worker_id');
     $stmt->execute(['status' => $newStatus, 'final' => $newStatus === 'sent' || $newStatus === 'failed' ? 1 : 0, 'error' => $result === 'failed' ? (string) ($input['error'] ?? 'Worker reported failure') : null, 'id' => $jobId, 'worker_id' => $worker['id']]);
+
+    $updateWorkerStmt = $pdo->prepare('UPDATE workers SET current_job_id = NULL WHERE id = :worker_id');
+    $updateWorkerStmt->execute(['worker_id' => $worker['id']]);
+
     $pdo->commit();
     jsonResponse(true, 'Result recorded', ['status' => $newStatus]);
 }
